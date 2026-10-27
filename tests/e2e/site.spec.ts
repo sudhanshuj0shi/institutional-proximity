@@ -98,20 +98,66 @@ test.describe("institution profile", () => {
   });
 
   test("distinguishes a proposed bill from an enacted law", async ({ page }) => {
-    await page.goto("/institutions/fixture-commission-a#history");
+    await page.goto("/institutions/fixture-commission-a/appointment");
     await expect(page.getByText("Bill introduced (proposed, not law)")).toBeVisible();
     await expect(page.getByText("Act enacted", { exact: false }).first()).toBeVisible();
   });
 
-  test("filters safeguards in place", async ({ page }) => {
+  test("safeguard tiles open to show what a provision does and does not establish", async ({ page }) => {
     await page.goto("/institutions/fixture-commission-a");
-    await page.locator('[data-safeguard-filter] a[data-dim="tenure"]').click();
-    await expect(page.locator('[data-dimension="removal"]')).toBeHidden();
-    await expect(page.locator('[data-dimension="tenure"]')).toBeVisible();
+    const tile = page.locator(".tile").first();
+    await expect(tile.locator(".tile-body")).toBeHidden();
+    await tile.locator("summary").click();
+    await expect(tile.getByText("Does not establish.")).toBeVisible();
+  });
+
+  test("the appointment flow opens a stage's legal text in a panel", async ({ page }) => {
+    await page.goto("/institutions/fixture-commission-a");
+    await expect(page.locator(".flow .flow-step")).toHaveCount(3);
+    await page.locator(".flow .flow-step").nth(1).click();
+    const panel = page.locator("#appt-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("link", { name: /Evidence C-\d{6}/ })).toBeVisible();
   });
 
   test("never invents precision: a year-only date is shown as a year", async ({ page }) => {
     await page.goto("/people/fixture-person-one");
-    await expect(page.locator(".timeline .when").first()).toHaveText(/^2018 – March 2021/);
+    await expect(page.locator(".fact-card h3", { hasText: "2018" })).toHaveText(/^2018 – March 2021$/);
+    await expect(page.locator(".viz-table li").first()).toContainText("2018 to March 2021");
+  });
+});
+
+test.describe("home visuals", () => {
+  test("the appointment diagram draws one line per documented institution-level relationship", async ({ page }) => {
+    await page.goto("/");
+    const data = JSON.parse((await page.locator("#viz-data").textContent())!);
+    await expect(page.locator(".web-lines .web-link")).toHaveCount(data.links.length);
+    await page.locator(".web-node", { hasText: "Fixture Selection Panel" }).click();
+    await expect(page.locator("#web-panel")).toBeVisible();
+  });
+
+  test("safeguard chips open their evidence; empty cells say nothing is documented, not absent", async ({ page }) => {
+    await page.goto("/");
+    await page.locator(".matrix .chip").first().click();
+    const panel = page.locator("#matrix-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText("What it does not establish")).toBeVisible();
+    await expect(page.getByText(/not that no safeguard exists/)).toBeVisible();
+  });
+
+  test("the timeline plots every dated event and tenure, with tooltips or tap details", async ({ page, isMobile }) => {
+    await page.goto("/");
+    const data = JSON.parse((await page.locator("#viz-data").textContent())!);
+    const dated = data.events.filter((e: { date: string | null }) => e.date).length;
+    await expect(page.locator(".timeline-svg .tl-ev")).toHaveCount(dated);
+    await expect(page.locator(".timeline-svg .tl-bar")).toHaveCount(data.tenures.filter((t: { start: string | null }) => t.start).length);
+    const bar = page.locator(".timeline-svg .tl-bar rect").first();
+    if (isMobile) {
+      await bar.tap();
+      await expect(page.locator("#home-tl-panel")).toBeVisible();
+    } else {
+      await bar.hover();
+      await expect(page.locator(".viz-tip")).toBeVisible();
+    }
   });
 });

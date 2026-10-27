@@ -1,11 +1,13 @@
 import { html, safeHref, SafeHtml } from "../lib/html.js";
 import { formatDated, formatRange, formatTimestamp } from "../lib/dates.js";
 import {
-  appointmentTypeLabel, entityKindLabel, eventRelationLabel, label, legalCategoryLabel, legalEventLabel,
+  appointmentTypeLabel, eventRelationLabel, label, legalCategoryLabel, legalEventLabel,
   relationshipLabel, safeguardLabel,
 } from "../lib/labels.js";
 import * as Q from "./queries.js";
-import { basisTag, claimFact, emptyState, fact, groupEvidence } from "./components.js";
+import { basisTag, emptyState, fact, groupEvidence } from "./components.js";
+import type { VizData } from "./visual-data.js";
+import { appointmentWeb, detailPanel, pipelineFlow, safeguardTiles, statStrip, timeline, vizData as vizDataScript } from "./visuals.js";
 
 const FACET_ORDER = ["identity", "legal_basis", "mandate", "composition", "funding", "accountability", "other"];
 const FACET_HEADINGS: Record<string, string> = {
@@ -134,60 +136,77 @@ export function legalTimeline(events: Q.LegalEvent[], basis: Map<string, "human"
 
 const aiCount = (d: InstitutionData) => [...d.basis.values()].filter((b) => b === "ai").length;
 
-export function institutionProfile(d: InstitutionData, activeSafeguard?: string): SafeHtml {
+/** Visual-first institution profile. Full text stays one click away (cards, panels, details). */
+export function institutionProfile(d: InstitutionData, viz: VizData): SafeHtml {
   const { inst } = d;
-  const facets = FACET_ORDER.map((k) => ({ k, items: d.claims.filter((c) => c.kind === k) })).filter((f) => f.items.length);
+  const facets = FACET_ORDER.flatMap((k) => d.claims.filter((c) => c.kind === k));
   const allSources = new Map<string, Q.Evidence>();
   for (const e of d.evidence) if (!allSources.has(e.source_id)) allSources.set(e.source_id, e);
+  const vStages = viz.stages.filter((s) => s.institution === inst.slug);
+  const vSafeguards = viz.safeguards.filter((s) => s.institution === inst.slug);
+  const hasLinks = viz.links.some((l) => l.source === inst.slug || l.target === inst.slug);
+  const hasTimeline = viz.events.some((e) => e.institution === inst.slug && e.date) || viz.tenures.some((t) => t.institution === inst.slug && t.start);
 
-  return html`<div class="wrap">
+  return html`${vizDataScript(viz)}<div class="wrap-wide">
     <p class="small sans"><a href="/institutions">Institutions</a></p>
-    <h1>${inst.canonical_name}</h1>
-    <p class="sans small">${label(legalCategoryLabel, inst.legal_category)}. ${label(entityKindLabel, inst.entity_kind)}.
-      ${inst.official_website ? html`<a href="${safeHref(inst.official_website)}" rel="noopener noreferrer">Official website</a>` : ""}</p>
-    <p class="ledger"><strong>${d.coverage?.published ?? 0}</strong> published claims.
-      ${Number(d.coverage?.in_progress ?? 0) > 0 ? html`<strong>${d.coverage?.in_progress}</strong> more are in research or review.` : ""}
-      ${aiCount(d) > 0 ? html`<strong>${aiCount(d)}</strong> of the items on this page were checked against their sources by an AI system and have not yet been reviewed by a person; each is labelled.` : ""}
-      Last checked ${formatTimestamp(inst.last_verified_at)}.</p>
+    <header class="hero-v">
+      <div>
+        <h1>${inst.canonical_name}</h1>
+        <p>${label(legalCategoryLabel, inst.legal_category)}${inst.official_website ? html`. <a href="${safeHref(inst.official_website)}" rel="noopener noreferrer">Official website</a>` : ""}</p>
+      </div>
+      ${statStrip([
+        { value: d.coverage?.published ?? 0, label: "published claims" },
+        { value: vSafeguards.length, label: "safeguards" },
+        { value: d.positions.length, label: "tenures" },
+      ])}
+    </header>
+    ${aiCount(d) > 0 ? html`<p class="viz-caption">Items marked <span class="stamp ai">Checked by AI</span> were checked against their sources by an AI system and not yet by a person. Last checked ${formatTimestamp(inst.last_verified_at)}.</p>` : ""}
 
-    <section class="section" aria-labelledby="h-overview">
-      <h2 id="h-overview">Overview</h2>
-      ${facets.map((f) => html`${f.k !== "identity" ? html`<h3>${FACET_HEADINGS[f.k] ?? f.k}</h3>` : ""}
-        <div class="frame">${f.items.map((c) => claimFact(c, d.ev))}</div>`)}
+    ${facets.length ? html`<section class="vsec" aria-labelledby="h-glance">
+      <div class="vsec-head"><h2 id="h-glance">At a glance</h2></div>
+      <div class="fact-cards">${facets.map((c) => html`<article class="fact-card">
+        <h3>${c.kind === "identity" ? "What it is" : FACET_HEADINGS[c.kind] ?? c.kind}</h3>
+        <p>${c.claim_text}</p>
+        ${c.known_limitations ? html`<details class="fact-src"><summary>Limitations</summary><p>${c.known_limitations}</p></details>` : ""}
+        <span class="fact-src"><a href="/claims/${c.public_id}">${c.public_id}</a>${(d.ev.get(c.public_id) ?? []).filter((e) => e.evidence_role === "supports").slice(0, 1).map((e) => html`, ${e.title}${e.relevant_section ? html`, ${e.relevant_section}` : ""}`)}${basisTag(c.verification_basis)}</span>
+      </article>`)}</div>
+    </section>` : ""}
+
+    <section class="vsec" id="appointment" aria-labelledby="h-appt">
+      <div class="vsec-head"><h2 id="h-appt">How appointments are made</h2>
+        <p>Select a stage to read what the law says. This shows the legal design, not how any particular appointment was made.</p></div>
+      ${d.processes.length === 0 ? emptyState("No verified appointment process yet", "It will appear here once checked against its source.")
+        : d.processes.map((p) => {
+          const st = vStages.filter((s) => s.process === p.office_title);
+          const historical = p.effective_until && p.effective_until_precision !== "unknown";
+          return html`<div class="process-head"><h3>${p.office_title}</h3>
+              <span>${historical ? "Historical. " : ""}${p.effective_from ? `In effect from ${formatDated(p.effective_from, p.effective_from_precision)}${historical ? ` to ${formatDated(p.effective_until, p.effective_until_precision)}` : ""}.` : "Start date not established."} ${p.legal_basis}. <a href="/claims/${p.claim_id}">${p.claim_id}</a>${basisTag(d.basis.get(p.claim_id))}</span></div>
+            ${st.length ? pipelineFlow(st, p.office_title) : html`<p class="quiet small sans">${p.process_description}</p>`}`;
+        })}
+      ${detailPanel("appt-panel")}
     </section>
 
-    <section class="section" id="appointment" aria-labelledby="h-appt">
-      <div class="section-head"><h2 id="h-appt">How appointments are made</h2>
-        ${d.processes.length ? html`<a class="sans small" href="/institutions/${inst.slug}/appointment">Open the appointment process</a>` : ""}</div>
-      ${pipelineSection(d, { full: false })}
-    </section>
+    ${vSafeguards.length ? html`<section class="vsec" id="safeguards" aria-labelledby="h-safe">
+      <div class="vsec-head"><h2 id="h-safe">Safeguards</h2><p>Open a tile to see what each provision does and does not establish.</p></div>
+      ${safeguardTiles(vSafeguards)}
+    </section>` : ""}
 
-    <section class="section" id="safeguards" aria-labelledby="h-safe">
-      <h2 id="h-safe">Safeguards</h2>
-      ${safeguardsSection(d, activeSafeguard)}
-    </section>
+    ${hasLinks ? html`<section class="vsec" id="relationships" aria-labelledby="h-rel">
+      <div class="vsec-head"><h2 id="h-rel">Who is involved</h2><a href="/map?institution=${inst.slug}">On the full map</a></div>
+      ${appointmentWeb(viz, inst.slug)}
+    </section>` : ""}
 
-    <section class="section" id="officeholders" aria-labelledby="h-off">
-      <h2 id="h-off">Officeholders</h2>
-      ${officeholdersSection(d)}
-    </section>
+    ${hasTimeline ? html`<section class="vsec" id="history" aria-labelledby="h-hist">
+      <div class="vsec-head"><h2 id="h-hist">Timeline</h2><p>Laws, judgments and documented tenures. Select a mark for details.</p></div>
+      ${timeline(viz, { id: "inst-tl", institutions: [inst.slug] })}
+    </section>` : ""}
 
-    <section class="section" id="relationships" aria-labelledby="h-rel">
-      <div class="section-head"><h2 id="h-rel">Documented relationships</h2>
-        <a class="sans small" href="/map?institution=${inst.slug}">See on the map</a></div>
-      ${relationshipsList(d.relationships, "Formal reporting lines, appointment roles and similar structural relationships will appear here once verified.", d.basis)}
-    </section>
-
-    <section class="section" id="history" aria-labelledby="h-hist">
-      <h2 id="h-hist">Legal and institutional changes</h2>
-      ${legalTimeline(d.events, d.basis)}
-    </section>
-
-    <section class="section" id="sources" aria-labelledby="h-src">
-      <h2 id="h-src">Sources</h2>
-      ${allSources.size === 0 ? html`<p class="quiet">No published sources yet.</p>`
-        : html`<ul class="evidence">${[...allSources.values()].map((e) => html`<li><a href="${safeHref(e.canonical_url)}" rel="noopener noreferrer">${e.title}</a>
-          <span class="small sans quiet">${e.publisher}. Accessed ${e.accessed_at ? formatDated(e.accessed_at, "day") : "date not recorded"}.</span></li>`)}</ul>`}
+    <section class="vsec" id="sources" aria-labelledby="h-src">
+      <div class="vsec-head"><h2 id="h-src">Sources</h2></div>
+      <details class="viz-table"><summary>${allSources.size} ${allSources.size === 1 ? "source" : "sources"} used on this page</summary>
+        <ul class="evidence">${[...allSources.values()].map((e) => html`<li><a href="${safeHref(e.canonical_url)}" rel="noopener noreferrer">${e.title}</a>
+          <span class="small sans quiet">${e.publisher}. ${e.accessed_at ? html`Accessed ${formatDated(e.accessed_at, "day")}.` : "Not yet opened by a reviewer; context only."}</span></li>`)}</ul>
+      </details>
       <p class="small sans"><a href="/corrections?page=/institutions/${inst.slug}">Report an error on this page</a></p>
     </section>
   </div>`;

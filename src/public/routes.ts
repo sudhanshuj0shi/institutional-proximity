@@ -3,14 +3,16 @@ import { html, jsonForScript, SafeHtml } from "../lib/html.js";
 import { page } from "../lib/layout.js";
 import { formatRange, formatTimestamp, sortKey } from "../lib/dates.js";
 import {
-  appointmentTypeLabel, categoryLabel, entityKindLabel, kindLabel, label, legalCategoryLabel, relationshipLabel,
+  categoryLabel, entityKindLabel, kindLabel, label, legalCategoryLabel, relationshipLabel,
   relationshipMeaning, RELATIONSHIP_TYPES,
 } from "../lib/labels.js";
 import * as Q from "./queries.js";
-import { basisTag, claimFact, emptyState, groupEvidence, sourceEntry, statusLedger } from "./components.js";
-import { appointmentPage, institutionProfile, legalTimeline, loadInstitution, relationshipsList } from "./institution-pages.js";
+import { basisTag, emptyState, groupEvidence, sourceEntry } from "./components.js";
+import { appointmentPage, institutionProfile, loadInstitution, relationshipsList } from "./institution-pages.js";
 import { buildGraph } from "./graph.js";
 import { methodologyBody } from "./methodology.js";
+import { loadVizData } from "./visual-data.js";
+import { appointmentWeb, safeguardMatrix, statStrip, timeline, vizData } from "./visuals.js";
 import { rateLimit } from "../lib/security.js";
 import { setSiteNotice } from "../lib/layout.js";
 import { str } from "../lib/validate.js";
@@ -67,68 +69,63 @@ export function publicRouter(): Router {
     next();
   });
 
-  // ---------------------------------------------------------------- Home
+  // ---------------------------------------------------------------- Home (visual first)
   r.get("/", wrap(async (req, res) => {
-    const [status, institutions, graph, recent, mandates, processes] = await Promise.all([
-      Q.siteStatus(), Q.listInstitutions({ kind: "independent_institution" }), loadGraph(),
-      Q.recentLegalEvents(365), Q.mandateClaims(), Q.allProcesses(),
-    ]);
+    const [status, viz] = await Promise.all([Q.siteStatus(), loadVizData()]);
+    const independents = viz.institutions.filter((i) => i.kind === "independent_institution");
+    const slugs = independents.map((i) => i.slug);
+    const published = Number(status.published_claims);
+    const aiShare = published ? Math.round((Number(status.published_ai_checked) / published) * 100) : 0;
     send(res, 200, page({
       title: "Institutional Proximity", path: "/", section: "home", editorial: req.editor,
-      description: "An evidence-led exploration of the structures, appointments and relationships surrounding India's independent institutions.",
-      scripts: graph.edges.length ? ["/static/js/map.js"] : [],
-      body: html`<div class="wrap">
-        <div class="frame hero">
+      description: "Who appoints India's independent institutions, and what protects them, drawn from the law with every line sourced.",
+      scripts: ["/static/js/viz.js"],
+      body: html`${vizData(viz)}<div class="wrap-wide">
+        <header class="hero-v">
           <div>
             <h1>Institutional Proximity</h1>
-            <p class="lede">An evidence-led exploration of the structures, appointments and relationships surrounding India's independent institutions.</p>
-            <p>Explore documented relationships, examine appointment mechanisms, and understand the safeguards designed to protect institutional independence.</p>
-            <div class="actions">
-              <a class="button" href="/institutions">Explore the institutions</a>
-              <a class="button secondary" href="/methodology">Read our methodology</a>
-            </div>
+            <p>Who appoints India's independent institutions, and what protects them. Drawn from the law, every line sourced.</p>
           </div>
-          <aside class="note" aria-label="What is published">
-            ${statusLedger(status)}
-            <p>Only statements checked against their source are shown, and each says who checked it: a person, or an AI system. Nothing on this site is inferred.</p>
-          </aside>
-        </div>
+          ${statStrip([
+            { value: published, label: "published claims" },
+            { value: independents.length, label: "institutions" },
+            { value: `${aiShare}%`, label: "checked by AI so far" },
+          ])}
+        </header>
 
-        <section class="section" aria-labelledby="h-map">
-          <div class="section-head"><h2 id="h-map">Relationship map</h2>
-            <a class="sans small" href="/map">Open the full map and list</a></div>
-          ${graph.edges.length === 0
-            ? emptyState("The map is empty until relationships are verified",
-                html`This map shows only relationships that have been checked against an official or reliable record. None have been published yet, so there is nothing to draw. We do not fill the space with sample or inferred connections.`)
-            : html`<div class="map-canvas" data-map data-compact><noscript><p class="small sans noscript-msg">The interactive map needs JavaScript. <a href="/map">Use the list view</a>.</p></noscript></div>
-                <script type="application/json" id="graph-data">${jsonForScript(graph)}</script>`}
+        ${published === 0 ? emptyState("Nothing is published yet",
+            "Visuals appear here as claims are checked against their sources. Nothing is drawn from inferred or sample data.") : html`
+        <section class="vsec" aria-labelledby="h-web">
+          <div class="vsec-head"><h2 id="h-web">Who appoints whom</h2><a href="/map">Full relationship map</a></div>
+          ${appointmentWeb(viz)}
         </section>
 
-        <section class="section" aria-labelledby="h-dir">
-          <div class="section-head"><h2 id="h-dir">Institutions</h2><a class="sans small" href="/institutions">Full directory</a></div>
-          ${institutions.length === 0
-            ? emptyState("No institution profiles are published yet",
-                "Research is under way on the Election Commission of India, the Comptroller and Auditor General of India and the Central Information Commission. Profiles appear here as their records are verified.")
-            : html`<ul class="directory">${institutions.map((i) => {
-                const m = mandates.find((c) => c.institution_slug === i.slug);
-                const p = processes.find((pp) => pp.institution_slug === i.slug && !pp.effective_until);
-                return html`<li><div><h3><a href="/institutions/${i.slug}">${i.canonical_name}</a></h3>
-                  ${m ? html`<p>${m.claim_text}</p>` : html`<p class="quiet small sans">Mandate not yet verified.</p>`}</div>
-                  <dl class="facts-list"><dt>Category</dt><dd>${label(legalCategoryLabel, i.legal_category)}</dd>
-                  <dt>Appointment</dt><dd>${p ? p.legal_basis : "Not yet verified"}</dd>
-                  <dt>Last verified</dt><dd>${formatTimestamp(i.last_verified_at)}</dd></dl></li>`;
-              })}</ul>`}
+        <section class="vsec" aria-labelledby="h-sg">
+          <div class="vsec-head"><h2 id="h-sg">Safeguards side by side</h2></div>
+          ${safeguardMatrix(viz, slugs)}
         </section>
 
-        ${recent.length ? html`<section class="section" aria-labelledby="h-recent"><h2 id="h-recent">Recent developments</h2>
-          ${legalTimeline(recent, await Q.basisFor(recent.map((e) => e.claim_id)))}</section>` : ""}
-
-        <section class="section frame" aria-labelledby="h-method">
-          <div><h2 id="h-method">How this works</h2>
-          <p>Every statement here has a public record: the claim, the source it rests on, where in that source the support appears, when it was last checked, and whether a person or an AI system did the checking. Statements that are disputed, being re-checked or withdrawn are taken down, and the withdrawal is logged.</p>
-          <p>A documented relationship, such as an appointment by the government, is a fact about structure. It is not, by itself, evidence of political allegiance or improper influence.</p>
-          <p><a href="/methodology">Read the full methodology</a></p></div>
+        <section class="vsec" aria-labelledby="h-tl">
+          <div class="vsec-head"><h2 id="h-tl">Laws, judgments and tenures</h2></div>
+          ${timeline(viz, { id: "home-tl", institutions: slugs })}
         </section>
+
+        <section class="vsec" aria-labelledby="h-inst">
+          <div class="vsec-head"><h2 id="h-inst">Explore an institution</h2><a href="/institutions">All institutions</a></div>
+          <div class="inst-cards">${independents.map((i) => {
+            const stages = viz.stages.filter((s) => s.institution === i.slug && s.process === (viz.stages.find((x) => x.institution === i.slug)?.process));
+            const sg = viz.safeguards.filter((s) => s.institution === i.slug).length;
+            const ten = viz.tenures.filter((t) => t.institution === i.slug).length;
+            return html`<a class="inst-card" href="/institutions/${i.slug}">
+              <span class="cat">${i.category}</span>
+              <h3>${i.name}</h3>
+              ${stages.length ? html`<span class="mini-flow" aria-label="${stages.length}-stage appointment process">${stages.map((st, n) => html`${n ? html`<span class="bar"></span>` : ""}<span class="dot" title="${st.title}">${st.seq}</span>`)}<span>&nbsp;${stages.length}-stage appointment</span></span>` : ""}
+              <span class="counts"><span><strong>${sg}</strong>safeguards</span><span><strong>${ten}</strong>tenures</span></span>
+            </a>`;
+          })}</div>
+        </section>`}
+
+        <p class="viz-caption vsec">A documented relationship, such as an appointment by the President, describes structure. It is not evidence of political influence. <a href="/methodology">How we check</a></p>
       </div>`,
     }));
   }));
@@ -185,12 +182,12 @@ export function publicRouter(): Router {
     if (!SLUG.test(slug)) return notFound(res, req.editor);
     const d = await loadInstitution(slug);
     if (!d) return notFound(res, req.editor);
-    const sg = str(req.query.safeguard, 40);
+    const viz = await loadVizData();
     send(res, 200, page({
       title: `${d.inst.canonical_name} — Institutional Profile`, path: req.path, section: "institutions", editorial: req.editor,
       description: `Verified legal basis, appointment process, safeguards, officeholders and legal history of the ${d.inst.canonical_name}, with sources.`,
-      body: institutionProfile(d, sg || undefined),
-      scripts: ["/static/js/enhance.js"],
+      body: institutionProfile(d, viz),
+      scripts: ["/static/js/viz.js"],
     }));
   }));
 
@@ -219,27 +216,36 @@ export function publicRouter(): Router {
     const ev = groupEvidence(evidence);
     const basis = await Q.basisFor([...positions.map((p) => p.claim_id), ...relationships.map((x) => x.claim_id)]);
     const sorted = [...positions].sort((a, b) => sortKey(a.start_date).localeCompare(sortKey(b.start_date)));
+    const viz = await loadVizData();
     send(res, 200, page({
       title: `Documented Career History — ${person.canonical_name}`, path: req.path, editorial: req.editor,
       description: `Verified public positions and documented professional relationships of ${person.canonical_name}, each linked to its source.`,
-      body: html`<div class="wrap">
-        <h1>${person.canonical_name}</h1>
-        <p class="ledger">Last verified ${formatTimestamp(person.last_verified_at)}. This profile includes only public positions and professional relationships relevant to the public role.</p>
-        <section class="section"><h2>Documented facts</h2><div class="frame">${claims.map((c) => claimFact(c, ev))}</div></section>
-        <section class="section" aria-labelledby="h-career"><h2 id="h-career">Career timeline</h2>
-          ${sorted.length === 0 ? emptyState("No verified positions yet", "Positions appear here once their dates and titles are checked against an official record.")
-            : html`<p class="small sans quiet">Filled markers are appointments to independent institutions; open markers are other public positions; dashed markers have no verified date.</p>
-            <ol class="timeline">${sorted.map((p) => html`<li class="${p.institution_kind === "independent_institution" ? "inst" : ""} ${p.start_date ? "" : "undated"}">
-              <span class="when">${formatRange(p.start_date, p.start_precision, p.end_date, p.end_precision, p.ongoing_as_of)}</span>
-              <h3>${p.title}, <a href="/institutions/${p.institution_slug}">${p.institution_name}</a></h3>
-              <p class="small sans">${label(appointmentTypeLabel, p.appointment_type)}${p.appointing_authority_name ? html`. Appointing authority: ${p.appointing_authority_name}` : ""}.
-                <a href="/claims/${p.claim_id}">Evidence ${p.claim_id}</a>${basisTag(basis.get(p.claim_id))}</p>
-            </li>`)}</ol>
-            <p class="law-vs-practice">A later appointment is shown because it is part of the public record. It is not, by itself, evidence of a reward, favour or arrangement.</p>`}
-        </section>
-        <section class="section"><h2>Documented relationships</h2>
-          ${relationshipsList(relationships, "No relationships involving this person have been verified.", basis)}</section>
-        <p class="small sans"><a href="/corrections?page=/people/${person.slug}">Report an error on this page</a></p>
+      scripts: ["/static/js/viz.js"],
+      body: html`${vizData(viz)}<div class="wrap-wide">
+        <header class="hero-v"><div>
+          <h1>${person.canonical_name}</h1>
+          <p>Public positions documented with sources. Last checked ${formatTimestamp(person.last_verified_at)}.</p>
+        </div>${statStrip([{ value: positions.length, label: "documented positions" }])}</header>
+
+        <section class="vsec" aria-labelledby="h-chart"><div class="vsec-head"><h2 id="h-chart">Documented tenures</h2>
+          <p>Select a bar for its source. A later appointment is part of the public record, not evidence of a reward or arrangement.</p></div>
+          ${timeline(viz, { id: "person-tl", person: person.slug })}</section>
+
+        <section class="vsec" aria-labelledby="h-facts"><div class="vsec-head"><h2 id="h-facts">The record</h2></div>
+          <div class="fact-cards">${[...claims.filter((c) => !["position", "relationship"].includes(c.kind)), ...sorted.map((p) => ({ public_id: p.claim_id, claim_text: "", kind: "position", known_limitations: null, verification_basis: basis.get(p.claim_id) ?? null, title: `${p.title}, ${p.institution_name}`, when: formatRange(p.start_date, p.start_precision, p.end_date, p.end_precision, p.ongoing_as_of) }))].map((c) => {
+            const pos = c as { title?: string; when?: string };
+            const full = claims.find((x) => x.public_id === c.public_id);
+            return html`<article class="fact-card">
+              <h3>${pos.title ? pos.when : label(kindLabel, full?.kind)}</h3>
+              <p>${pos.title ?? full?.claim_text ?? ""}</p>
+              ${full?.known_limitations ? html`<details class="fact-src"><summary>Limitations</summary><p>${full.known_limitations}</p></details>` : ""}
+              <span class="fact-src"><a href="/claims/${c.public_id}">${c.public_id}</a>${(ev.get(c.public_id) ?? []).filter((e) => e.evidence_role === "supports").slice(0, 1).map((e) => html`, ${e.title}`)}${basisTag(c.verification_basis)}</span>
+            </article>`;
+          })}</div></section>
+
+        ${relationships.length ? html`<section class="vsec"><div class="vsec-head"><h2>Documented relationships</h2></div>
+          ${relationshipsList(relationships, "", basis)}</section>` : ""}
+        <p class="small sans vsec"><a href="/corrections?page=/people/${person.slug}">Report an error on this page</a></p>
       </div>`,
     }));
   }));
@@ -297,7 +303,7 @@ export function publicRouter(): Router {
           </div>
           <script type="application/json" id="graph-data">${jsonForScript(graph)}</script>
 
-          <section class="section" aria-labelledby="h-list"><h2 id="h-list">All relationships as a list</h2>
+          <details class="section map-list-details" data-map-list-details open><summary><h2 id="h-list">All relationships as a list</h2></summary>
             <p class="small sans quiet">${edges.length} of ${graph.edges.length} relationships shown.</p>
             <ul class="rel-list" data-map-list>${edges.map((e) => {
               const s = nodeById.get(e.source)!; const t = nodeById.get(e.target)!;
@@ -307,7 +313,7 @@ export function publicRouter(): Router {
                 <p class="small sans quiet">${e.period}${e.historical ? ". Ended" : ""}. ${e.meaning} <a href="/claims/${e.claimId}">Evidence ${e.claimId}</a>${basisTag(e.checkedBy)}</p>
               </li>`;
             })}</ul>
-          </section>`}
+          </details>`}
       </div>`,
     }));
   }));

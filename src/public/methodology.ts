@@ -47,7 +47,14 @@ export function methodologyBody() {
     <section class="section" id="workflow" aria-labelledby="h-wf">
       <h2 id="h-wf">How a claim is verified</h2>
       <div class="prose">
-        <p>Every statement on the site is a claim with its own public ID. A claim moves through these states:</p>
+        <p>Every statement on the site is a claim with its own public ID. The main path:</p>
+        <ol class="flow flow-static" aria-label="Main path of a claim">
+          <li><span class="flow-step"><span class="flow-num">1</span><span class="flow-title">Draft</span><span class="flow-actor">Researched, with sources attached</span></span><span class="flow-arrow" aria-hidden="true"></span></li>
+          <li><span class="flow-step"><span class="flow-num">2</span><span class="flow-title">Pending review</span><span class="flow-actor">Waiting to be checked</span></span><span class="flow-arrow" aria-hidden="true"></span></li>
+          <li><span class="flow-step"><span class="flow-num">3</span><span class="flow-title">Verified</span><span class="flow-actor">Each source opened and confirmed, by a person or by AI</span></span><span class="flow-arrow" aria-hidden="true"></span></li>
+          <li><span class="flow-step"><span class="flow-num">4</span><span class="flow-title">Published</span><span class="flow-actor">Shown, labelled with who checked it</span></span></li>
+        </ol>
+        <p>At any point a claim can be taken down for re-checking, marked disputed, or withdrawn. All states:</p>
         <div class="table-scroll"><table class="plain"><tbody>
           ${Object.keys(STATUS_MEANING).map((k) => html`<tr><th scope="row">${statusLabel[k]}</th><td>${STATUS_MEANING[k]}</td></tr>`)}
         </tbody></table></div>

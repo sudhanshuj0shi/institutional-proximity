@@ -4,7 +4,7 @@ import { mkdirSync, copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 await build({
-  entryPoints: { map: "src/client/map.ts", enhance: "src/client/enhance.ts" },
+  entryPoints: { map: "src/client/map.ts", enhance: "src/client/enhance.ts", viz: "src/client/viz.ts" },
   outdir: "public/js", bundle: true, minify: true, format: "iife", target: ["es2020"], sourcemap: false, logLevel: "warning",
 });
 

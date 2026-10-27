@@ -103,7 +103,7 @@ describe("public pages", () => {
 });
 
 describe("AI-checked disclosure", () => {
-  it("labels an AI-checked claim on its page, in the margin of its profile, and in the site banner", async () => {
+  it("labels an AI-checked claim on its page, on its profile card, and in the site banner", async () => {
     const { confirmLink } = await import("./helpers.js");
     const inst = await createInstitution(team.researcher, `Test AI Body ${uid()}`);
     const claim = await createClaim(team.researcher, { institutionId: inst, text: "Test AI-checked identity statement." });
@@ -121,7 +121,8 @@ describe("AI-checked disclosure", () => {
     const slug = (await o.query("SELECT slug FROM core.institution WHERE id = $1", [inst])).rows[0].slug;
     await o.end();
     const profile = await request(app).get(`/institutions/${slug}`);
-    expect(profile.text).toContain("Not yet reviewed by a person.");
+    expect(profile.text).toMatch(/class="fact-card"[\s\S]*?Checked by AI/);
+    expect(profile.text).toContain("were checked against their sources by an AI system and not yet by a person");
     // Banner refreshes at most every 30s; a fresh app instance picks it up immediately.
     const { createApp } = await import("../src/server.js");
     const home = await request(createApp()).get("/");

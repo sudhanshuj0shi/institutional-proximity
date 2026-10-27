@@ -264,6 +264,9 @@ function init(container: HTMLElement) {
   if (linked && !compact) void showEdge(linked);
 }
 
+// With the graph available, fold the long list away; it stays open without JavaScript.
+document.querySelector("[data-map-list-details]")?.removeAttribute("open");
+
 document.querySelectorAll<HTMLElement>("[data-map]").forEach((c) => {
   try { init(c); } catch (err) {
     c.replaceChildren(el("p", "The interactive map could not be drawn in this browser. The list below shows every relationship.", { class: "noscript-msg" }));

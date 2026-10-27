@@ -145,3 +145,7 @@ export async function submitCorrection(input: { claimId: string | null; pagePath
     [input.claimId, input.pagePath, input.message, input.name, input.contact]);
   return r.rows[0].ref as string;
 }
+
+export const allSafeguards = () => q<Safeguard>("SELECT * FROM public_api.safeguards ORDER BY institution_slug, dimension, id");
+export const allLegalEvents = () => q<LegalEvent>("SELECT * FROM public_api.legal_events ORDER BY event_date NULLS LAST, id");
+export const allStages = () => q<AppointmentStage>("SELECT * FROM public_api.appointment_stages ORDER BY process_id, seq");
