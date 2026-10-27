@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+test-results/
+playwright-report/
+*.log
+public/js/
+public/fonts/

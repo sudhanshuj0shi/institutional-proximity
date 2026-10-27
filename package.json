@@ -1,0 +1,56 @@
+{
+  "name": "institutional-proximity",
+  "version": "1.0.0",
+  "description": "Evidence-led exploration of India's independent institutions",
+  "scripts": {
+    "dev": "npm run build:client && tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.json && npm run build:client",
+    "build:client": "node scripts/build-client.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
+    "lint": "eslint .",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed-candidates": "tsx src/db/seed-candidates.ts",
+    "editor:create-user": "tsx src/editorial/create-user.ts",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "secrets:check": "node scripts/check-secrets.mjs",
+    "db:release": "tsx src/db/release.ts",
+    "db:ai-publish": "tsx src/db/ai-publish.ts"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^4.22.3",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@eslint/js": "^10.0.1",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/source-serif-4": "^5.3.1",
+    "@playwright/test": "^1.63.0",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/d3": "^7.4.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.2.1",
+    "d3": "^7.9.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "playwright": "^1.63.0",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  }
+}
